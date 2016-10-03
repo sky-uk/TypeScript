@@ -21,7 +21,7 @@ namespace ts.server {
 
     export class SessionClient implements LanguageService {
         private sequence: number = 0;
-        private lineMaps: ts.Map<number[]> = {};
+        private lineMaps: ts.Map<number[]> = ts.createMap<number[]>();
         private messages: string[] = [];
         private lastRenameEntry: RenameEntry;
 
@@ -37,7 +37,7 @@ namespace ts.server {
         }
 
         private getLineMap(fileName: string): number[] {
-            let lineMap = ts.lookUp(this.lineMaps, fileName);
+            let lineMap = this.lineMaps[fileName];
             if (!lineMap) {
                 const scriptSnapshot = this.host.getScriptSnapshot(fileName);
                 lineMap = this.lineMaps[fileName] = ts.computeLineStarts(scriptSnapshot.getText(0, scriptSnapshot.getLength()));
@@ -45,8 +45,9 @@ namespace ts.server {
             return lineMap;
         }
 
-        private lineOffsetToPosition(fileName: string, lineOffset: protocol.Location): number {
-            return ts.computePositionOfLineAndCharacter(this.getLineMap(fileName), lineOffset.line - 1, lineOffset.offset - 1);
+        private lineOffsetToPosition(fileName: string, lineOffset: protocol.Location, lineMap?: number[]): number {
+            lineMap = lineMap || this.getLineMap(fileName);
+            return ts.computePositionOfLineAndCharacter(lineMap, lineOffset.line - 1, lineOffset.offset - 1);
         }
 
         private positionToOneBasedLineOffset(fileName: string, position: number): protocol.Location {
@@ -215,7 +216,18 @@ namespace ts.server {
             return {
                 isMemberCompletion: false,
                 isNewIdentifierLocation: false,
-                entries: response.body
+                entries: response.body.map(entry => {
+
+                    if (entry.replacementSpan !== undefined) {
+                        const { name, kind, kindModifiers, sortText, replacementSpan} = entry;
+
+                        const convertedSpan = createTextSpanFromBounds(this.lineOffsetToPosition(fileName, replacementSpan.start),
+                            this.lineOffsetToPosition(fileName, replacementSpan.end));
+                        return { name, kind, kindModifiers, sortText, replacementSpan: convertedSpan };
+                    }
+
+                    return entry as { name: string, kind: string, kindModifiers: string, sortText: string };
+                })
             };
         }
 
@@ -232,6 +244,10 @@ namespace ts.server {
             const response = this.processResponse<protocol.CompletionDetailsResponse>(request);
             Debug.assert(response.body.length === 1, "Unexpected length of completion details response body.");
             return response.body[0];
+        }
+
+        getCompletionEntrySymbol(fileName: string, position: number, entryName: string): Symbol {
+            throw new Error("Not Implemented Yet.");
         }
 
         getNavigateToItems(searchValue: string): NavigateToItem[] {
@@ -352,6 +368,28 @@ namespace ts.server {
             });
         }
 
+        getImplementationAtPosition(fileName: string, position: number): ImplementationLocation[] {
+            const lineOffset = this.positionToOneBasedLineOffset(fileName, position);
+            const args: protocol.FileLocationRequestArgs = {
+                file: fileName,
+                line: lineOffset.line,
+                offset: lineOffset.offset,
+            };
+
+            const request = this.processRequest<protocol.ImplementationRequest>(CommandNames.Implementation, args);
+            const response = this.processResponse<protocol.ImplementationResponse>(request);
+
+            return response.body.map(entry => {
+                const fileName = entry.file;
+                const start = this.lineOffsetToPosition(fileName, entry.start);
+                const end = this.lineOffsetToPosition(fileName, entry.end);
+                return {
+                    fileName,
+                    textSpan: ts.createTextSpanFromBounds(start, end)
+                };
+            });
+        }
+
         findReferences(fileName: string, position: number): ReferencedSymbol[] {
             // Not yet implemented.
             return [];
@@ -449,7 +487,7 @@ namespace ts.server {
             return this.lastRenameEntry.locations;
         }
 
-        decodeNavigationBarItems(items: protocol.NavigationBarItem[], fileName: string): NavigationBarItem[] {
+        decodeNavigationBarItems(items: protocol.NavigationBarItem[], fileName: string, lineMap: number[]): NavigationBarItem[] {
             if (!items) {
                 return [];
             }
@@ -458,8 +496,11 @@ namespace ts.server {
                 text: item.text,
                 kind: item.kind,
                 kindModifiers: item.kindModifiers || "",
-                spans: item.spans.map(span => createTextSpanFromBounds(this.lineOffsetToPosition(fileName, span.start), this.lineOffsetToPosition(fileName, span.end))),
-                childItems: this.decodeNavigationBarItems(item.childItems, fileName),
+                spans: item.spans.map(span =>
+                    createTextSpanFromBounds(
+                        this.lineOffsetToPosition(fileName, span.start, lineMap),
+                        this.lineOffsetToPosition(fileName, span.end, lineMap))),
+                childItems: this.decodeNavigationBarItems(item.childItems, fileName, lineMap),
                 indent: item.indent,
                 bolded: false,
                 grayed: false
@@ -474,7 +515,8 @@ namespace ts.server {
             const request = this.processRequest<protocol.NavBarRequest>(CommandNames.NavBar, args);
             const response = this.processResponse<protocol.NavBarResponse>(request);
 
-            return this.decodeNavigationBarItems(response.body, fileName);
+            const lineMap = this.getLineMap(fileName);
+            return this.decodeNavigationBarItems(response.body, fileName, lineMap);
         }
 
         getNameOrDottedNameSpan(fileName: string, startPos: number, endPos: number): TextSpan {
@@ -583,7 +625,7 @@ namespace ts.server {
             throw new Error("Not Implemented Yet.");
         }
 
-        isValidBraceCompletionAtPostion(fileName: string, position: number, openingBrace: number): boolean {
+        isValidBraceCompletionAtPosition(fileName: string, position: number, openingBrace: number): boolean {
             throw new Error("Not Implemented Yet.");
         }
 
@@ -633,6 +675,10 @@ namespace ts.server {
         }
 
         getNonBoundSourceFile(fileName: string): SourceFile {
+            throw new Error("SourceFile objects are not serializable through the server protocol.");
+        }
+
+        getSourceFile(fileName: string): SourceFile {
             throw new Error("SourceFile objects are not serializable through the server protocol.");
         }
 

@@ -7,7 +7,7 @@
 verify.navigationBar([
     {
         "text": "<global>",
-        "kind": "module",
+        "kind": "script",
         "childItems": [
             {
                 "text": "f",
@@ -18,6 +18,12 @@ verify.navigationBar([
     {
         "text": "f",
         "kind": "function",
+        "childItems": [
+            {
+                "text": "<function>",
+                "kind": "function"
+            }
+        ],
         "indent": 1
     }
 ]);

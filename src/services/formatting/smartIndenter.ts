@@ -8,20 +8,20 @@ namespace ts.formatting {
             Unknown = -1
         }
 
-        export function getIndentation(position: number, sourceFile: SourceFile, options: EditorOptions): number {
+        export function getIndentation(position: number, sourceFile: SourceFile, options: EditorSettings): number {
             if (position > sourceFile.text.length) {
-                return 0; // past EOF
+                return getBaseIndentation(options); // past EOF
             }
 
             // no indentation when the indent style is set to none,
             // so we can return fast
-            if (options.IndentStyle === IndentStyle.None) {
+            if (options.indentStyle === IndentStyle.None) {
                 return 0;
             }
 
             const precedingToken = findPrecedingToken(position, sourceFile);
             if (!precedingToken) {
-                return 0;
+                return getBaseIndentation(options);
             }
 
             // no indentation in string \regex\template literals
@@ -35,14 +35,14 @@ namespace ts.formatting {
             // indentation is first non-whitespace character in a previous line
             // for block indentation, we should look for a line which contains something that's not
             // whitespace.
-            if (options.IndentStyle === IndentStyle.Block) {
+            if (options.indentStyle === IndentStyle.Block) {
 
                 // move backwards until we find a line with a non-whitespace character,
                 // then find the first non-whitespace character for that line.
                 let current = position;
                 while (current > 0) {
                     const char = sourceFile.text.charCodeAt(current);
-                    if (!isWhiteSpace(char) && !isLineBreak(char)) {
+                    if (!isWhiteSpace(char)) {
                         break;
                     }
                     current--;
@@ -75,7 +75,7 @@ namespace ts.formatting {
                         indentationDelta = 0;
                     }
                     else {
-                        indentationDelta = lineAtPosition !== currentStart.line ? options.IndentSize : 0;
+                        indentationDelta = lineAtPosition !== currentStart.line ? options.indentSize : 0;
                     }
 
                     break;
@@ -88,7 +88,7 @@ namespace ts.formatting {
                 }
                 actualIndentation = getLineIndentationWhenExpressionIsInMultiLine(current, sourceFile, options);
                 if (actualIndentation !== Value.Unknown) {
-                    return actualIndentation + options.IndentSize;
+                    return actualIndentation + options.indentSize;
                 }
 
                 previous = current;
@@ -96,16 +96,20 @@ namespace ts.formatting {
             }
 
             if (!current) {
-                // no parent was found - return 0 to be indented on the level of SourceFile
-                return 0;
+                // no parent was found - return the base indentation of the SourceFile
+                return getBaseIndentation(options);
             }
 
             return getIndentationForNodeWorker(current, currentStart, /*ignoreActualIndentationRange*/ undefined, indentationDelta, sourceFile, options);
         }
 
-        export function getIndentationForNode(n: Node, ignoreActualIndentationRange: TextRange, sourceFile: SourceFile, options: FormatCodeOptions): number {
+        export function getIndentationForNode(n: Node, ignoreActualIndentationRange: TextRange, sourceFile: SourceFile, options: EditorSettings): number {
             const start = sourceFile.getLineAndCharacterOfPosition(n.getStart(sourceFile));
             return getIndentationForNodeWorker(n, start, ignoreActualIndentationRange, /*indentationDelta*/ 0, sourceFile, options);
+        }
+
+        export function getBaseIndentation(options: EditorSettings) {
+            return options.baseIndentSize || 0;
         }
 
         function getIndentationForNodeWorker(
@@ -114,7 +118,7 @@ namespace ts.formatting {
             ignoreActualIndentationRange: TextRange,
             indentationDelta: number,
             sourceFile: SourceFile,
-            options: EditorOptions): number {
+            options: EditorSettings): number {
 
             let parent: Node = current.parent;
             let parentStart: LineAndCharacter;
@@ -154,7 +158,7 @@ namespace ts.formatting {
 
                 // increase indentation if parent node wants its content to be indented and parent and child nodes don't start on the same line
                 if (shouldIndentChildNode(parent, current) && !parentAndChildShareLine) {
-                    indentationDelta += options.IndentSize;
+                    indentationDelta += options.indentSize;
                 }
 
                 current = parent;
@@ -162,7 +166,7 @@ namespace ts.formatting {
                 parent = current.parent;
             }
 
-            return indentationDelta;
+            return indentationDelta + getBaseIndentation(options);
         }
 
 
@@ -178,7 +182,7 @@ namespace ts.formatting {
         /*
          * Function returns Value.Unknown if indentation cannot be determined
          */
-        function getActualIndentationForListItemBeforeComma(commaToken: Node, sourceFile: SourceFile, options: EditorOptions): number {
+        function getActualIndentationForListItemBeforeComma(commaToken: Node, sourceFile: SourceFile, options: EditorSettings): number {
             // previous token is comma that separates items in list - find the previous item and try to derive indentation from it
             const commaItemInfo = findListItemInfo(commaToken);
             if (commaItemInfo && commaItemInfo.listItemIndex > 0) {
@@ -198,13 +202,13 @@ namespace ts.formatting {
             currentLineAndChar: LineAndCharacter,
             parentAndChildShareLine: boolean,
             sourceFile: SourceFile,
-            options: EditorOptions): number {
+            options: EditorSettings): number {
 
             // actual indentation is used for statements\declarations if one of cases below is true:
             // - parent is SourceFile - by default immediate children of SourceFile are not indented except when user indents them manually
             // - parent and child are not on the same line
             const useActualIndentation =
-                (isDeclaration(current) || isStatement(current)) &&
+                (isDeclaration(current) || isStatementButNotDeclaration(current)) &&
                 (parent.kind === SyntaxKind.SourceFile || !parentAndChildShareLine);
 
             if (!useActualIndentation) {
@@ -305,7 +309,7 @@ namespace ts.formatting {
             return undefined;
         }
 
-        function getActualIndentationForListItem(node: Node, sourceFile: SourceFile, options: EditorOptions): number {
+        function getActualIndentationForListItem(node: Node, sourceFile: SourceFile, options: EditorSettings): number {
             const containingList = getContainingList(node, sourceFile);
             return containingList ? getActualIndentationFromList(containingList) : Value.Unknown;
 
@@ -315,7 +319,7 @@ namespace ts.formatting {
             }
         }
 
-        function getLineIndentationWhenExpressionIsInMultiLine(node: Node, sourceFile: SourceFile, options: EditorOptions): number {
+        function getLineIndentationWhenExpressionIsInMultiLine(node: Node, sourceFile: SourceFile, options: EditorSettings): number {
             // actual indentation should not be used when:
             // - node is close parenthesis - this is the end of the expression
             if (node.kind === SyntaxKind.CloseParenToken) {
@@ -363,7 +367,7 @@ namespace ts.formatting {
             }
         }
 
-        function deriveActualIndentationFromList(list: Node[], index: number, sourceFile: SourceFile, options: EditorOptions): number {
+        function deriveActualIndentationFromList(list: Node[], index: number, sourceFile: SourceFile, options: EditorSettings): number {
             Debug.assert(index >= 0 && index < list.length);
             const node = list[index];
 
@@ -385,7 +389,7 @@ namespace ts.formatting {
             return Value.Unknown;
         }
 
-        function findColumnForFirstNonWhitespaceCharacterInLine(lineAndCharacter: LineAndCharacter, sourceFile: SourceFile, options: EditorOptions): number {
+        function findColumnForFirstNonWhitespaceCharacterInLine(lineAndCharacter: LineAndCharacter, sourceFile: SourceFile, options: EditorSettings): number {
             const lineStart = sourceFile.getPositionOfLineAndCharacter(lineAndCharacter.line, 0);
             return findFirstNonWhitespaceColumn(lineStart, lineStart + lineAndCharacter.character, sourceFile, options);
         }
@@ -397,17 +401,17 @@ namespace ts.formatting {
             value of 'character' for '$' is 3
             value of 'column' for '$' is 6 (assuming that tab size is 4)
         */
-        export function findFirstNonWhitespaceCharacterAndColumn(startPos: number, endPos: number, sourceFile: SourceFile, options: EditorOptions) {
+        export function findFirstNonWhitespaceCharacterAndColumn(startPos: number, endPos: number, sourceFile: SourceFile, options: EditorSettings) {
             let character = 0;
             let column = 0;
             for (let pos = startPos; pos < endPos; pos++) {
                 const ch = sourceFile.text.charCodeAt(pos);
-                if (!isWhiteSpace(ch)) {
+                if (!isWhiteSpaceSingleLine(ch)) {
                     break;
                 }
 
                 if (ch === CharacterCodes.tab) {
-                    column += options.TabSize + (column % options.TabSize);
+                    column += options.tabSize + (column % options.tabSize);
                 }
                 else {
                     column++;
@@ -418,7 +422,7 @@ namespace ts.formatting {
             return { column, character };
         }
 
-        export function findFirstNonWhitespaceColumn(startPos: number, endPos: number, sourceFile: SourceFile, options: EditorOptions): number {
+        export function findFirstNonWhitespaceColumn(startPos: number, endPos: number, sourceFile: SourceFile, options: EditorSettings): number {
             return findFirstNonWhitespaceCharacterAndColumn(startPos, endPos, sourceFile, options).column;
         }
 
@@ -462,7 +466,10 @@ namespace ts.formatting {
                 case SyntaxKind.ParenthesizedType:
                 case SyntaxKind.TaggedTemplateExpression:
                 case SyntaxKind.AwaitExpression:
+                case SyntaxKind.NamedExports:
                 case SyntaxKind.NamedImports:
+                case SyntaxKind.ExportSpecifier:
+                case SyntaxKind.ImportSpecifier:
                     return true;
             }
             return false;
@@ -486,6 +493,11 @@ namespace ts.formatting {
                 case SyntaxKind.GetAccessor:
                 case SyntaxKind.SetAccessor:
                     return childKind !== SyntaxKind.Block;
+                case SyntaxKind.ExportDeclaration:
+                    return childKind !== SyntaxKind.NamedExports;
+                case SyntaxKind.ImportDeclaration:
+                    return childKind !== SyntaxKind.ImportClause ||
+                        ((<ImportClause>child).namedBindings && (<ImportClause>child).namedBindings.kind !== SyntaxKind.NamedImports);
                 case SyntaxKind.JsxElement:
                     return childKind !== SyntaxKind.JsxClosingElement;
             }

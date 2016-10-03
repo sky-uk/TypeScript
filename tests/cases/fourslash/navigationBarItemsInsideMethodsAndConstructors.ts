@@ -21,7 +21,7 @@
 verify.navigationBar([
     {
         "text": "<global>",
-        "kind": "module",
+        "kind": "script",
         "childItems": [
             {
                 "text": "Class",
@@ -73,20 +73,20 @@ verify.navigationBar([
         "childItems": [
             {
                 "text": "LocalEnumMemberInConstructor",
-                "kind": "property"
+                "kind": "const"
             }
         ],
-        "indent": 2
+        "indent": 3
     },
     {
         "text": "LocalFunctionInConstructor",
         "kind": "function",
-        "indent": 2
+        "indent": 3
     },
     {
         "text": "LocalInterfaceInConstrcutor",
         "kind": "interface",
-        "indent": 2
+        "indent": 3
     },
     {
         "text": "method",
@@ -113,10 +113,10 @@ verify.navigationBar([
         "childItems": [
             {
                 "text": "LocalEnumMemberInMethod",
-                "kind": "property"
+                "kind": "const"
             }
         ],
-        "indent": 2
+        "indent": 3
     },
     {
         "text": "LocalFunctionInMethod",
@@ -127,11 +127,11 @@ verify.navigationBar([
                 "kind": "function"
             }
         ],
-        "indent": 2
+        "indent": 3
     },
     {
         "text": "LocalInterfaceInMethod",
         "kind": "interface",
-        "indent": 2
+        "indent": 3
     }
 ]);
